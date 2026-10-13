@@ -1,0 +1,95 @@
+/* Cascade-layer order is load-bearing — declared first, in this single CSS
+   entry file, per the CityLaw NG theming brief. Headwind's stylesheet is
+   imported here (not from a component) so bundler chunk order can't invert it. */
+@layer theme, base, hw-theme, hw-base, hw-components, components, hw-utilities, utilities;
+
+/* Per the brief's Typography section: Inter for UI text, Azeret Mono for
+   code. CityLaw NG loads both via next/font/google, which isn't available
+   outside Next.js — this is the Vite-equivalent (Google Fonts CSS) so the
+   standalone build still matches their actual rendered typography. Must
+   stay ahead of the tailwind/headwind imports below: per spec, @import
+   rules must precede every other rule but @charset and bare @layer
+   statements — once a layered @import injects real CSS, anything after
+   it is too late and gets silently dropped by the browser. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Azeret+Mono:wght@400;500&display=swap');
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@import '@cycomdatasystems/headwindui/styles.css';
+
+body {
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+code,
+.tiptap pre,
+.tiptap code {
+  font-family:
+    'Azeret Mono',
+    source-code-pro,
+    Menlo,
+    Monaco,
+    Consolas,
+    'Courier New',
+    monospace;
+}
+
+/* We don't have CityLaw NG's tailwind.config.js (no @config here — this is a
+   standalone build, not their monorepo), so dark mode is wired the v4-native
+   way: a `.dark` class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+body {
+  margin: 0;
+}
+
+#root {
+  height: 100vh;
+}
+
+/*
+ * Recreated from the CityLaw NG theming brief's documented .tiptap scale
+ * (we don't have their actual globals.css, only the table of values) so
+ * assistant markdown reads as "native" rather than getting a fresh prose
+ * theme. Paragraph / heading / link / code rules only — the brief's table.
+ */
+.tiptap p {
+  @apply text-base leading-relaxed my-4;
+}
+.tiptap h1 {
+  @apply text-3xl font-bold;
+}
+.tiptap h2 {
+  @apply text-2xl font-bold;
+}
+.tiptap h3 {
+  @apply text-xl font-bold;
+}
+.tiptap h4 {
+  @apply text-lg font-bold;
+}
+.tiptap h5 {
+  @apply text-base font-bold;
+}
+.tiptap a {
+  @apply text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300;
+}
+.tiptap code {
+  @apply bg-zinc-100 text-pink-600 dark:bg-zinc-800 dark:text-pink-400 rounded px-1 py-0.5;
+}
+.tiptap pre {
+  /* Plain Tailwind radius, not rounded-hw-md: Headwind ships hw-* radius as
+     a pre-compiled literal class in its dist CSS, not a @theme token our
+     own build's @apply can regenerate — matches the brief's own note that
+     code-block styling isn't token-driven anyway. */
+  @apply bg-zinc-900 text-zinc-100 dark:bg-zinc-800 rounded-lg p-4 overflow-x-auto;
+}
+.tiptap blockquote {
+  @apply border-l-4 border-sky-500 dark:border-sky-400 bg-zinc-50 dark:bg-zinc-900/40 px-4 py-2;
+}
