@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
+import { SunIcon, MoonIcon, ComputerDesktopIcon } from '@heroicons/react/24/outline'
 import { HWToaster, hwToast, HWButton } from '@cycomdatasystems/headwindui'
 import { ChatPanel } from './components/ChatPanel'
 import { ErrorBanner } from './components/ErrorBanner'
+import { LoginGate } from './components/LoginGate'
+import { callJudicialAgent } from './api/judicialAgent'
+import { clearCachedToken } from './api/tokenLambda'
+import { getStoredUserId, setStoredUserId, clearStoredUserId } from './auth/session'
 import { readThemeMode, setThemeMode, syncThemeFromStorage } from './theme/themeMode'
 import type { ThemeMode } from './theme/themeMode'
 import type { ChatMessage, ChatError } from './types'
 
-const MOCK_RESPONSE = {
-  text: `Based on the case documents, the hearing for case 13-10009 was continued to next month per the filed motion. The court cited scheduling conflicts on both sides as the reason for the continuance. No new evidence was introduced during this session.`,
-  citations: [
-    { id: 'c1', label: 'Case 13-10009, Docket #14' },
-    { id: 'c2', label: 'Motion to Continue, p. 2' },
-  ],
+const THEME_ICONS: Record<ThemeMode, typeof SunIcon> = {
+  light: SunIcon,
+  dark: MoonIcon,
+  system: ComputerDesktopIcon,
 }
 
 function ThemeToggle() {
@@ -23,18 +26,30 @@ function ThemeToggle() {
     setMode(next)
   }
 
+  const Icon = THEME_ICONS[mode]
+
   return (
-    <HWButton variant="ghost" size="sm" onClick={cycle}>
-      Theme: {mode}
-    </HWButton>
+    <HWButton
+      variant="ghost"
+      size="sm"
+      onClick={cycle}
+      aria-label={`Theme: ${mode}. Click to change.`}
+      leftIcon={<Icon className="h-4 w-4" />}
+    />
   )
 }
 
 export default function App() {
+  const [userId, setUserId] = useState<string | null>(() => getStoredUserId())
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<ChatError | null>(null)
-  const stopRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  // One id for the whole conversation, not per-message — the backend uses
+  // this to carry multi-turn context, per Sara's example (same chat_id on a
+  // follow-up query answers it without the case number being repeated).
+  const chatIdRef = useRef(crypto.randomUUID())
 
   const patchMessage = (id: string, patch: Partial<ChatMessage>) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)))
@@ -47,9 +62,15 @@ export default function App() {
     syncThemeFromStorage()
   }, [])
 
-  const runRequest = (text: string) => {
+  const runRequest = async (text: string, file?: File) => {
     setError(null)
-    const userMsg: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text }
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+      attachmentName: file?.name,
+    }
     const assistantId = crypto.randomUUID()
     const assistantMsg: ChatMessage = {
       id: assistantId,
@@ -60,65 +81,95 @@ export default function App() {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg])
     setIsStreaming(true)
-    stopRef.current = false
 
-    // Demo-only failure path: typing "error" simulates a request that fails
-    // mid-flight, so the banner has a real trigger to show against rather
-    // than sitting unused in the component tree.
-    const shouldFail = /\berror\b/i.test(text)
-    const words = MOCK_RESPONSE.text.split(' ')
-    let i = 0
+    const controller = new AbortController()
+    abortRef.current = controller
 
-    const tick = () => {
-      if (stopRef.current) {
+    try {
+      // Single-shot request/response — the backend doesn't token-stream, so
+      // the typing indicator (via the empty-content assistant message above)
+      // covers the wait rather than faking a stream of an answer already in
+      // hand.
+      const responseText = await callJudicialAgent({
+        userQuery: text,
+        chatId: chatIdRef.current,
+        file,
+        signal: controller.signal,
+      })
+      patchMessage(assistantId, { streaming: false, content: responseText, timestamp: Date.now() })
+      hwToast.success('Response ready')
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
         patchMessage(assistantId, { streaming: false })
-        setIsStreaming(false)
         return
       }
-      if (shouldFail && i >= Math.floor(words.length / 3)) {
-        // Drop the partial assistant message — the banner, not a half-written
-        // bubble, is the record of what happened.
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId))
-        setIsStreaming(false)
-        setError({
-          message: 'The assistant could not complete this response. Your message was not lost.',
-          retryText: text,
-        })
-        return
-      }
-      if (i >= words.length) {
-        patchMessage(assistantId, { streaming: false, citations: MOCK_RESPONSE.citations })
-        setIsStreaming(false)
-        hwToast.success('Response ready')
-        return
-      }
-      i += 1
-      patchMessage(assistantId, { content: words.slice(0, i).join(' ') })
-      setTimeout(tick, 45)
+      // Drop the partial (empty) assistant message — the banner, not a
+      // half-written bubble, is the record of what happened.
+      setMessages((prev) => prev.filter((m) => m.id !== assistantId))
+      setError({
+        message: err instanceof Error ? err.message : 'The assistant request failed.',
+        retryText: text,
+        retryFile: file,
+      })
+    } finally {
+      setIsStreaming(false)
+      abortRef.current = null
     }
-
-    setTimeout(tick, 350) // brief pause before first token — lets the typing indicator show
   }
 
   const handleStop = () => {
-    stopRef.current = true
+    abortRef.current?.abort()
   }
 
   const handleRetry = () => {
     if (!error) return
-    runRequest(error.retryText)
+    void runRequest(error.retryText, error.retryFile)
+  }
+
+  const handleLogin = (id: string) => {
+    setStoredUserId(id)
+    setUserId(id)
+  }
+
+  const handleSwitchUser = () => {
+    clearStoredUserId()
+    clearCachedToken()
+    setUserId(null)
+    // A fresh identity shouldn't inherit the previous person's transcript.
+    setMessages([])
+    setError(null)
+  }
+
+  if (!userId) {
+    return (
+      <>
+        <LoginGate onSubmit={handleLogin} />
+        <HWToaster position="bottom-right" />
+      </>
+    )
   }
 
   return (
     <>
-      <div className="absolute right-4 top-3 z-50">
-        <ThemeToggle />
-      </div>
       <ChatPanel
         messages={messages}
         isStreaming={isStreaming}
         onSend={runRequest}
         onStop={handleStop}
+        headerActions={
+          <>
+            {/* Hidden below sm: on a narrow screen the login id is the
+                least essential item here, and "Switch user" already makes
+                clear whose session this is without it. */}
+            <span className="hidden max-w-[8rem] truncate text-xs text-hw-text-muted sm:inline">
+              {userId}
+            </span>
+            <HWButton variant="ghost" size="sm" onClick={handleSwitchUser}>
+              Switch user
+            </HWButton>
+            <ThemeToggle />
+          </>
+        }
         errorBanner={
           error && (
             <ErrorBanner

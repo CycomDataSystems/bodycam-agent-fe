@@ -10,12 +10,14 @@ export function ChatPanel({
   onSend,
   onStop,
   errorBanner,
+  headerActions,
 }: {
   messages: ChatMessage[]
   isStreaming: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, file?: File) => void
   onStop: () => void
   errorBanner?: ReactNode
+  headerActions?: ReactNode
 }) {
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -32,8 +34,14 @@ export function ChatPanel({
     // h-screen + overflow-hidden root, matching the documented host-app
     // shell convention rather than letting the page itself scroll.
     <div className="h-screen w-full flex flex-col overflow-hidden bg-hw-bg text-hw-text">
-      <header className="flex items-center justify-between border-b border-hw-border2 px-4 py-3">
+      {/* flex-wrap so narrow screens drop actions to a second line instead
+          of overflowing or colliding with the title — the previous
+          absolutely-positioned controls had neither safeguard. */}
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-hw-border2 px-4 py-3">
         <h1 className="text-base font-bold text-hw-text0">Case Assistant</h1>
+        {headerActions && (
+          <div className="flex min-w-0 items-center gap-2">{headerActions}</div>
+        )}
       </header>
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6">

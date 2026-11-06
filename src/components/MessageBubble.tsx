@@ -4,6 +4,13 @@ import type { ChatMessage } from '../types'
 import { TypingIndicator } from './TypingIndicator'
 import { CopyButton } from './CopyButton'
 
+function formatTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 function renderInline(text: string) {
   // Minimal inline-code parser (`code`) — enough for a prototype without
   // pulling in a markdown dependency. Plain-text segments use a Fragment
@@ -21,7 +28,14 @@ function renderInline(text: string) {
 export function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end">
+        {message.attachmentName && (
+          <div className="mb-1">
+            <HWChip size="sm" variant="secondary">
+              {message.attachmentName}
+            </HWChip>
+          </div>
+        )}
         <div
           className={cn(
             'max-w-[75%] rounded-hw-lg px-4 py-2.5',
@@ -30,6 +44,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         >
           <p className="text-base leading-relaxed whitespace-pre-wrap">{message.content}</p>
         </div>
+        {message.timestamp && (
+          <span className="mt-1 text-xs text-hw-text-muted">{formatTime(message.timestamp)}</span>
+        )}
       </div>
     )
   }
@@ -66,7 +83,10 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           )}
 
           {!message.streaming && message.content.length > 0 && (
-            <div className="mt-2 flex justify-end">
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-xs text-hw-text-muted">
+                {message.timestamp && formatTime(message.timestamp)}
+              </span>
               <CopyButton value={message.content} />
             </div>
           )}
